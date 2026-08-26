@@ -16,8 +16,8 @@ def run_festival_crawler(keyword: str = "서울", max_pages: int = 10) -> list[d
             args=[
                 "--no-sandbox",
                 "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",  # 공유 메모리 제한 해제 (Render 필수)
-                "--single-process",         # 프로세스를 하나만 띄워 RAM 절약
+                "--disable-dev-shm-usage",  # Render 필수 (공유 메모리 제한 해제)
+                "--single-process",         # RAM 절약
                 "--disable-gpu",
                 "--no-zygote"
             ]
@@ -28,21 +28,26 @@ def run_festival_crawler(keyword: str = "서울", max_pages: int = 10) -> list[d
         )
         page = context.new_page()
 
-        # ⚡ [핵심 추가] 불필요한 네트워크 리소스 차단 (RAM 사용량 극단적 절감)
+        # ⚡ 이미지, 폰트, 미디어 등 무거운 리소스만 핀포인트 차단
         def block_aggressively(route):
-            if route.request.resource_type in ["image", "stylesheet", "font", "media"]:
+            if route.request.resource_type in ["image", "font", "media"]:
                 route.abort()
             else:
                 route.continue_()
 
         page.route("**/*", block_aggressively)
 
-        # 2. 검색 페이지 이동
+        # 2. 검색 페이지 이동 (domcontentloaded 대기)
         url = f"https://korean.visitkorea.or.kr/search/search_list.do?keyword={encoded_keyword}"
         page.goto(url, wait_until="domcontentloaded", timeout=30000)
 
+        # ⚡ 탭 버튼/검색결과 영역이 렌더링될 때까지 explicit wait
+        try:
+            page.wait_for_selector("button[role='tab'], .festival_list", timeout=10000)
+        except Exception:
+            pass
+
         # 3. 팝업 거절
-        page.wait_for_timeout(1000)
         try:
             page.locator("a:has-text('거절'), button:has-text('거절')").first.click(force=True, timeout=2000)
         except Exception:
@@ -60,7 +65,7 @@ def run_festival_crawler(keyword: str = "서울", max_pages: int = 10) -> list[d
                     if (btn) btn.click();
                 }
             """)
-        page.wait_for_timeout(2000)
+        page.wait_for_timeout(1500)
 
         # 5. [최신순] 정렬 적용
         try:
@@ -72,7 +77,7 @@ def run_festival_crawler(keyword: str = "서울", max_pages: int = 10) -> list[d
             latest_btn = page.locator("button[data-sort='FINAL_MODIFIED_DATE/DESC']").first
             if latest_btn.is_visible():
                 latest_btn.click(force=True)
-                page.wait_for_timeout(2000)
+                page.wait_for_timeout(1500)
         except Exception as e:
             print(f"Sort click failed: {e}")
 
@@ -82,7 +87,7 @@ def run_festival_crawler(keyword: str = "서울", max_pages: int = 10) -> list[d
         while current_page <= max_pages:
             try:
                 page.wait_for_selector(".festival_list ul > li", timeout=5000)
-                page.wait_for_timeout(1000)
+                page.wait_for_timeout(800)
             except Exception:
                 break
 
@@ -157,14 +162,14 @@ def run_festival_crawler(keyword: str = "서울", max_pages: int = 10) -> list[d
                 if btn.is_visible():
                     btn.click(force=True)
                     clicked = True
-                    page.wait_for_timeout(2500)
+                    page.wait_for_timeout(2000)
                     break
 
             if not clicked:
                 arrow_next = page.locator("a.page_navi.next").first
                 if arrow_next.is_visible():
                     arrow_next.click(force=True)
-                    page.wait_for_timeout(2500)
+                    page.wait_for_timeout(2000)
                 else:
                     break
 
