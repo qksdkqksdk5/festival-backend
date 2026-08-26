@@ -10,7 +10,18 @@ def run_festival_crawler(keyword: str = "서울", max_pages: int = 10) -> list[d
     encoded_keyword = quote(keyword)
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        # Playwright 브라우저 실행 부분 수정
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",  # 공유 메모리 제한 해제 (Render 필수)
+                "--single-process",         # 프로세스를 하나만 띄워 RAM 절약
+                "--disable-gpu",
+                "--no-zygote"
+            ]
+        )
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             viewport={"width": 1920, "height": 1080}
