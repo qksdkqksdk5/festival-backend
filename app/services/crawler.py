@@ -10,7 +10,6 @@ def run_festival_crawler(keyword: str = "서울", max_pages: int = 10) -> list[d
     encoded_keyword = quote(keyword)
 
     with sync_playwright() as p:
-        # Render 무료 플랜 메모리 관리를 위한 브라우저 옵션 유지
         browser = p.chromium.launch(
             headless=True,
             args=[
@@ -28,29 +27,33 @@ def run_festival_crawler(keyword: str = "서울", max_pages: int = 10) -> list[d
         )
         page = context.new_page()
 
-        # 1. 검색 페이지 이동 (networkidle 대기가 수집 실패를 막는 핵심)
+        # 1. networkidle 대신 domcontentloaded 사용으로 타임아웃 방지
         url = f"https://korean.visitkorea.or.kr/search/search_list.do?keyword={encoded_keyword}"
-        page.goto(url, wait_until="networkidle", timeout=30000)
+        page.goto(url, wait_until="domcontentloaded", timeout=30000)
 
-        # 2. 팝업 거절
-        page.wait_for_timeout(1000)
+        # 2. 팝업 거절 및 본문 요소 대기
+        page.wait_for_timeout(1500)
         try:
             page.locator("a:has-text('거절'), button:has-text('거절')").first.click(force=True, timeout=2000)
         except Exception:
             pass
 
         # 3. [축제/공연/행사] 탭 클릭
-        tab_btn = page.locator("button[role='tab']:has-text('축제/공연/행사')").first
-        if tab_btn.is_visible():
-            tab_btn.click(force=True)
-        else:
-            page.evaluate("""
-                () => {
-                    const btn = Array.from(document.querySelectorAll("button[role='tab']"))
-                                     .find(b => b.textContent.includes('축제/공연/행사'));
-                    if (btn) btn.click();
-                }
-            """)
+        try:
+            tab_btn = page.locator("button[role='tab']:has-text('축제/공연/행사')").first
+            if tab_btn.is_visible():
+                tab_btn.click(force=True)
+            else:
+                page.evaluate("""
+                    () => {
+                        const btn = Array.from(document.querySelectorAll("button[role='tab']"))
+                                         .find(b => b.textContent.includes('축제/공연/행사'));
+                        if (btn) btn.click();
+                    }
+                """)
+        except Exception as e:
+            print(f"Tab click failed: {e}")
+
         page.wait_for_timeout(2000)
 
         # 4. [최신순] 정렬 적용
@@ -67,12 +70,13 @@ def run_festival_crawler(keyword: str = "서울", max_pages: int = 10) -> list[d
         except Exception as e:
             print(f"Sort click failed: {e}")
 
-        # 5. 페이징 루프
+        # 5. 페이징 및 수집 루프
         current_page = 1
 
         while current_page <= max_pages:
             try:
-                page.wait_for_selector(".festival_list ul > li", timeout=5000)
+                # 리스트 아이템 요소가 실제로 화면에 뜰 때까지 대기
+                page.wait_for_selector(".festival_list ul > li", timeout=10000)
                 page.wait_for_timeout(1000)
             except Exception:
                 break
@@ -93,17 +97,15 @@ def run_festival_crawler(keyword: str = "서울", max_pages: int = 10) -> list[d
                     date_elem = item.locator(".date").first
                     period = date_elem.inner_text().strip() if date_elem.count() > 0 else "상세페이지 참조"
 
-                    # 날짜 검증
                     if not is_ongoing_or_upcoming(period):
                         continue
 
                     loc_elem = item.locator(".area_wrap .area, .area").first
-                    location = loc_elem.inner_text().strip() if loc_elem.count() > 0 else keyword
+                    raw_location = loc_elem.inner_text().strip() if loc_elem.count() > 0 else keyword
 
                     img_elem = item.locator("img").first
                     image_url = img_elem.get_attribute("src") if img_elem.count() > 0 else ""
 
-                    # detail_url 추출 로직
                     link_elem = item.locator("a").first
                     raw_detail_url = link_elem.get_attribute("href") if link_elem.count() > 0 else ""
 
@@ -127,7 +129,7 @@ def run_festival_crawler(keyword: str = "서울", max_pages: int = 10) -> list[d
                             "id": str(uuid.uuid4()),
                             "title": title,
                             "period": period,
-                            "location": location,
+                            "location": raw_location,
                             "image_url": image_url or "",
                             "detail_url": full_detail_url,
                         }
@@ -136,7 +138,6 @@ def run_festival_crawler(keyword: str = "서울", max_pages: int = 10) -> list[d
                 except Exception:
                     continue
 
-            # 6. 다음 페이지 이동
             current_page += 1
 
             candidate_btns = page.locator("div.page_links a").filter(
