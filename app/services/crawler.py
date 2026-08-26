@@ -10,7 +10,7 @@ def run_festival_crawler(keyword: str = "서울", max_pages: int = 10) -> list[d
     encoded_keyword = quote(keyword)
 
     with sync_playwright() as p:
-        # Playwright 브라우저 실행 부분 수정
+        # 1. Playwright 브라우저 최소 메모리 옵션으로 실행
         browser = p.chromium.launch(
             headless=True,
             args=[
@@ -28,18 +28,27 @@ def run_festival_crawler(keyword: str = "서울", max_pages: int = 10) -> list[d
         )
         page = context.new_page()
 
-        # 1. 검색 페이지 이동
-        url = f"https://korean.visitkorea.or.kr/search/search_list.do?keyword={encoded_keyword}"
-        page.goto(url, wait_until="networkidle", timeout=30000)
+        # ⚡ [핵심 추가] 불필요한 네트워크 리소스 차단 (RAM 사용량 극단적 절감)
+        def block_aggressively(route):
+            if route.request.resource_type in ["image", "stylesheet", "font", "media"]:
+                route.abort()
+            else:
+                route.continue_()
 
-        # 2. 팝업 거절
+        page.route("**/*", block_aggressively)
+
+        # 2. 검색 페이지 이동
+        url = f"https://korean.visitkorea.or.kr/search/search_list.do?keyword={encoded_keyword}"
+        page.goto(url, wait_until="domcontentloaded", timeout=30000)
+
+        # 3. 팝업 거절
         page.wait_for_timeout(1000)
         try:
             page.locator("a:has-text('거절'), button:has-text('거절')").first.click(force=True, timeout=2000)
         except Exception:
             pass
 
-        # 3. [축제/공연/행사] 탭 클릭
+        # 4. [축제/공연/행사] 탭 클릭
         tab_btn = page.locator("button[role='tab']:has-text('축제/공연/행사')").first
         if tab_btn.is_visible():
             tab_btn.click(force=True)
@@ -53,7 +62,7 @@ def run_festival_crawler(keyword: str = "서울", max_pages: int = 10) -> list[d
             """)
         page.wait_for_timeout(2000)
 
-        # 4. [최신순] 정렬 적용
+        # 5. [최신순] 정렬 적용
         try:
             sort_dropdown = page.locator("button:has-text('관련도순')").first
             if sort_dropdown.is_visible():
@@ -67,7 +76,7 @@ def run_festival_crawler(keyword: str = "서울", max_pages: int = 10) -> list[d
         except Exception as e:
             print(f"Sort click failed: {e}")
 
-        # 5. 페이징 루프
+        # 6. 페이징 루프
         current_page = 1
 
         while current_page <= max_pages:
@@ -103,26 +112,21 @@ def run_festival_crawler(keyword: str = "서울", max_pages: int = 10) -> list[d
                     img_elem = item.locator("img").first
                     image_url = img_elem.get_attribute("src") if img_elem.count() > 0 else ""
 
-                    # 💡 [최종 분기 처리] detail_url 로직
+                    # detail_url 추출 로직
                     link_elem = item.locator("a").first
                     raw_detail_url = link_elem.get_attribute("href") if link_elem.count() > 0 else ""
                     
                     full_detail_url = ""
                     if raw_detail_url:
-                        # 1. UUID 형식 체크 (예: 92afdcab-c094-4ac9-a083-cffb5470a3ca)
                         uuid_match = re.search(r"[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}", raw_detail_url, re.IGNORECASE)
-                        
-                        # 2. '작은따옴표' 안의 ID 추출
                         id_match = re.search(r"'([^']+)'", raw_detail_url)
                         extracted_id = id_match.group(1) if (id_match and id_match.group(1) != "searchResult") else ""
 
                         if uuid_match:
-                            # UUID 형태 -> fes_detail.do?cotid= 사용
                             cotid = uuid_match.group(0)
                             full_detail_url = f"https://korean.visitkorea.or.kr/detail/fes_detail.do?cotid={cotid}"
                         elif extracted_id:
                             if extracted_id.isdigit():
-                                # 숫자 형태 -> kfes/detail/fstvlDetail.do?cmsCntntsId= 사용
                                 full_detail_url = f"https://korean.visitkorea.or.kr/kfes/detail/fstvlDetail.do?cmsCntntsId={extracted_id}"
                             else:
                                 full_detail_url = f"https://korean.visitkorea.or.kr/detail/fes_detail.do?cotid={extracted_id}"
@@ -141,7 +145,7 @@ def run_festival_crawler(keyword: str = "서울", max_pages: int = 10) -> list[d
                 except Exception:
                     continue
 
-            # 6. 다음 페이지 이동
+            # 7. 다음 페이지 이동
             current_page += 1
 
             candidate_btns = page.locator("div.page_links a").filter(
