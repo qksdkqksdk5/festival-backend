@@ -4,8 +4,10 @@ from app.models import CrawlTask, Festival, TaskStatus
 from app.services.crawler import run_festival_crawler
 
 
-@celery_app.task(bind=True, max_retries=2)
-def crawl_festivals_task(self, task_id: str, keyword: str = "서울", max_pages: int = 10):
+def run_crawl_process(task_id: str, keyword: str = "서울", max_pages: int = 10):
+    """
+    실제 크롤링 및 DB 저장을 수행하는 공통 로직 (BackgroundTasks 및 Celery 공용)
+    """
     db = SessionLocal()
     try:
         task = db.query(CrawlTask).filter_by(task_id=task_id).first()
@@ -17,7 +19,6 @@ def crawl_festivals_task(self, task_id: str, keyword: str = "서울", max_pages:
 
         saved_count = 0
         for data in festivals_data:
-            # title과 period가 동일한 축제가 이미 DB에 있는지 확인
             existing_festival = (
                 db.query(Festival)
                 .filter(Festival.title == data["title"], Festival.period == data["period"])
@@ -25,13 +26,11 @@ def crawl_festivals_task(self, task_id: str, keyword: str = "서울", max_pages:
             )
 
             if existing_festival:
-                # 이미 존재하면 최신 정보로 업데이트 (Upsert - Update)
                 existing_festival.location = data["location"]
                 existing_festival.image_url = data["image_url"]
                 existing_festival.detail_url = data["detail_url"]
                 existing_festival.task_id = task_id
             else:
-                # 없으면 신규 저장 (Upsert - Insert)
                 festival = Festival(
                     id=data["id"],
                     task_id=task_id,
@@ -57,6 +56,14 @@ def crawl_festivals_task(self, task_id: str, keyword: str = "서울", max_pages:
         if task:
             task.status = TaskStatus.FAILED
             db.commit()
-        raise self.retry(exc=exc, countdown=5)
+        raise exc
     finally:
         db.close()
+
+
+@celery_app.task(bind=True, max_retries=2)
+def crawl_festivals_task(self, task_id: str, keyword: str = "서울", max_pages: int = 10):
+    try:
+        return run_crawl_process(task_id=task_id, keyword=keyword, max_pages=max_pages)
+    except Exception as exc:
+        raise self.retry(exc=exc, countdown=5)
