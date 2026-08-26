@@ -12,15 +12,18 @@ app = FastAPI(
     version=settings.VERSION
 )
 
-# ----------------- CORS 설정 추가 -----------------
+# CORS 설정 추가
+origins = [
+    "*"  # 테스트용: 모든 도메인 허용 (배포 시에는 프론트엔드 주소로 변경 추천)
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],  # Vite React 기본 포트 허용
+    allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["*"],  # 모든 HTTP 메서드 허용 (GET, POST 등)
+    allow_headers=["*"],  # 모든 헤더 허용
 )
-# --------------------------------------------------
 
 app.include_router(crawl_router, prefix="/api/v1")
 app.include_router(festivals_router, prefix="/api/v1")
