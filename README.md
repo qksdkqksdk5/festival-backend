@@ -2,6 +2,8 @@
 
 대한민국 구석구석 사이트의 실시간 축제 데이터를 Playwright 기반으로 동적 크롤링하고, 지역별/일정별 정제된 API를 제공하는 FastAPI 백엔드 서비스입니다.
 
+🖥️ **Web Dashboard**: [https://festival-frontend-bice.vercel.app/](https://festival-frontend-bice.vercel.app/)
+
 ## 🛠️ Tech Stack
 - **Language & Framework**: Python 3.14 / FastAPI
 - **Web Scraping**: Playwright (Headless Chromium)
